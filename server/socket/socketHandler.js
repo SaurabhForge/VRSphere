@@ -27,15 +27,18 @@ const socketHandler = (io) => {
       socket.join(roomId);
 
       if (!rooms[roomId]) rooms[roomId] = {};
+      const wasAlreadyInRoom = Boolean(rooms[roomId][socket.id]);
       rooms[roomId][socket.id] = { userId, userName, userAvatar, socketId: socket.id };
 
-      // Tell everyone already in the room about the newcomer
-      socket.to(roomId).emit('user-joined', {
-        socketId: socket.id,
-        userId,
-        userName,
-        userAvatar,
-      });
+      if (!wasAlreadyInRoom) {
+        // Tell everyone already in the room about the newcomer
+        socket.to(roomId).emit('user-joined', {
+          socketId: socket.id,
+          userId,
+          userName,
+          userAvatar,
+        });
+      }
 
       // Send the new user the list of existing participants
       const existingUsers = Object.values(rooms[roomId]).filter(

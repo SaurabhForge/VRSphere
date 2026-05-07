@@ -159,53 +159,73 @@ export default function EventRoomPage() {
   useEffect(() => {
     if (!socket || !user || !event || !mediaReady) return;
 
-    socket.emit('join-room', {
+    const roomPayload = {
       roomId: eventId,
       userId: user._id,
       userName: user.name,
       userAvatar: user.avatar,
-    });
+    };
+
+    const joinCurrentRoom = () => {
+      socket.emit('join-room', roomPayload);
+    };
+
+    if (socket.connected) joinCurrentRoom();
+    socket.on('connect', joinCurrentRoom);
 
     // Existing users — initiate offers
-    socket.on('room-users', (users) => {
+    const handleRoomUsers = (users) => {
       setParticipants(users);
       users.forEach((u) => createPeer(u.socketId, socket, true));
-    });
+    };
 
-    socket.on('user-joined', (u) => {
-      setParticipants((p) => [...p, u]);
+    const handleUserJoined = (u) => {
+      setParticipants((prev) => (
+        prev.some((participant) => participant.socketId === u.socketId)
+          ? prev
+          : [...prev, u]
+      ));
       showToast(`${u.userName} joined the room`, 'info');
-    });
+    };
 
-    socket.on('user-left', ({ socketId }) => {
+    const handleUserLeft = ({ socketId }) => {
       setParticipants((p) => p.filter((u) => u.socketId !== socketId));
       removePeer(socketId);
-    });
+    };
+
+    socket.on('room-users', handleRoomUsers);
+    socket.on('user-joined', handleUserJoined);
+    socket.on('user-left', handleUserLeft);
+
+    const handleWebRtcOffer = (data) => handleOffer({ ...data, socket });
+    const handleReceiveMessage = (msg) => setMessages((p) => [...p, msg]);
+    const handleReceiveReaction = ({ reaction, userName }) => {
+      const id = Date.now();
+      setReactions((p) => [...p, { id, reaction, userName }]);
+      setTimeout(() => setReactions((p) => p.filter((r) => r.id !== id)), 3000);
+    };
 
     // WebRTC signaling
-    socket.on('webrtc-offer', (data) => handleOffer({ ...data, socket }));
+    socket.on('webrtc-offer', handleWebRtcOffer);
     socket.on('webrtc-answer', handleAnswer);
     socket.on('webrtc-ice-candidate', handleIceCandidate);
 
     // Chat
-    socket.on('receive-message', (msg) => setMessages((p) => [...p, msg]));
+    socket.on('receive-message', handleReceiveMessage);
 
     // Reactions
-    socket.on('receive-reaction', ({ reaction, userName }) => {
-      const id = Date.now();
-      setReactions((p) => [...p, { id, reaction, userName }]);
-      setTimeout(() => setReactions((p) => p.filter((r) => r.id !== id)), 3000);
-    });
+    socket.on('receive-reaction', handleReceiveReaction);
 
     return () => {
-      socket.off('room-users');
-      socket.off('user-joined');
-      socket.off('user-left');
-      socket.off('webrtc-offer');
-      socket.off('webrtc-answer');
-      socket.off('webrtc-ice-candidate');
-      socket.off('receive-message');
-      socket.off('receive-reaction');
+      socket.off('connect', joinCurrentRoom);
+      socket.off('room-users', handleRoomUsers);
+      socket.off('user-joined', handleUserJoined);
+      socket.off('user-left', handleUserLeft);
+      socket.off('webrtc-offer', handleWebRtcOffer);
+      socket.off('webrtc-answer', handleAnswer);
+      socket.off('webrtc-ice-candidate', handleIceCandidate);
+      socket.off('receive-message', handleReceiveMessage);
+      socket.off('receive-reaction', handleReceiveReaction);
       socket.emit('leave-room', { roomId: eventId });
     };
   }, [

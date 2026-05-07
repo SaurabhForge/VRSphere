@@ -25,8 +25,12 @@ export const SocketProvider = ({ children }) => {
     const token = localStorage.getItem('vrsphere_token');
     socketRef.current = io(getSocketUrl(), {
       auth: { token },
-      transports: ['websocket'],
+      transports: ['websocket', 'polling'],
       withCredentials: true,
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 500,
+      reconnectionDelayMax: 5000,
     });
 
     socketRef.current.on('connect', () => {
@@ -41,6 +45,8 @@ export const SocketProvider = ({ children }) => {
 
     return () => {
       socketRef.current?.disconnect();
+      socketRef.current = null;
+      setConnected(false);
     };
   }, [user]);
 
