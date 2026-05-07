@@ -11,30 +11,75 @@ import LoadingSpinner from '../components/UI/LoadingSpinner';
 
 function StreamTile({ stream, label, muted = false }) {
   const videoRef = useRef(null);
-  const hasVideo = stream?.getVideoTracks?.().some(
-    (track) => track.readyState === 'live' && track.enabled
-  );
+  const [videoReady, setVideoReady] = useState(false);
 
   useEffect(() => {
-    if (videoRef.current && stream) {
-      videoRef.current.srcObject = stream;
-    }
+    const video = videoRef.current;
+    if (!video) return undefined;
+
+    video.srcObject = stream || null;
+
+    const updateVideoState = () => {
+      const hasLiveVideoTrack = stream?.getVideoTracks?.().some(
+        (track) => track.readyState === 'live'
+      );
+      const hasFrame = video.videoWidth > 0;
+
+      setVideoReady(Boolean(hasLiveVideoTrack && hasFrame));
+
+      if (stream) {
+        const playPromise = video.play();
+        if (playPromise?.catch) playPromise.catch(() => {});
+      }
+    };
+
+    updateVideoState();
+
+    const tracks = stream?.getTracks?.() || [];
+    tracks.forEach((track) => {
+      track.addEventListener('mute', updateVideoState);
+      track.addEventListener('unmute', updateVideoState);
+      track.addEventListener('ended', updateVideoState);
+    });
+
+    stream?.addEventListener?.('addtrack', updateVideoState);
+    stream?.addEventListener?.('removetrack', updateVideoState);
+    video.addEventListener('loadedmetadata', updateVideoState);
+    video.addEventListener('loadeddata', updateVideoState);
+    video.addEventListener('canplay', updateVideoState);
+    video.addEventListener('playing', updateVideoState);
+    video.addEventListener('resize', updateVideoState);
+
+    return () => {
+      tracks.forEach((track) => {
+        track.removeEventListener('mute', updateVideoState);
+        track.removeEventListener('unmute', updateVideoState);
+        track.removeEventListener('ended', updateVideoState);
+      });
+
+      stream?.removeEventListener?.('addtrack', updateVideoState);
+      stream?.removeEventListener?.('removetrack', updateVideoState);
+      video.removeEventListener('loadedmetadata', updateVideoState);
+      video.removeEventListener('loadeddata', updateVideoState);
+      video.removeEventListener('canplay', updateVideoState);
+      video.removeEventListener('playing', updateVideoState);
+      video.removeEventListener('resize', updateVideoState);
+      if (video.srcObject === stream) video.srcObject = null;
+    };
   }, [stream]);
 
   return (
     <div className="participant-video" style={{ width: 220, aspectRatio: '16 / 10', borderRadius: 'var(--radius-lg)' }}>
-      {stream && (
-        <video
-          ref={videoRef}
-          autoPlay
-          muted={muted}
-          playsInline
-          style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: hasVideo ? 1 : 0 }}
-        />
-      )}
-      {!hasVideo && (
+      <video
+        ref={videoRef}
+        autoPlay
+        muted={muted}
+        playsInline
+        style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: videoReady ? 1 : 0 }}
+      />
+      {!videoReady && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(39, 39, 42, 0.9)', color: 'var(--text-muted)', fontWeight: 700 }}>
-          Camera off
+          Connecting camera...
         </div>
       )}
       <div className="participant-label">{label}</div>
@@ -191,11 +236,17 @@ export default function EventRoomPage() {
 
   if (loading) return <LoadingSpinner fullPage />;
 
-  const remoteStreamEntries = Object.entries(remoteStreams).map(([socketId, stream]) => ({
-    socketId,
-    stream,
-    userName: participants.find((p) => p.socketId === socketId)?.userName || 'Participant',
+  const remoteStreamEntries = participants.map((participant) => ({
+    socketId: participant.socketId,
+    stream: remoteStreams[participant.socketId],
+    userName: participant.userName || 'Participant',
   }));
+
+  Object.entries(remoteStreams).forEach(([socketId, stream]) => {
+    if (!remoteStreamEntries.some((entry) => entry.socketId === socketId)) {
+      remoteStreamEntries.push({ socketId, stream, userName: 'Participant' });
+    }
+  });
 
   return (
     <div className="vr-room-wrapper">

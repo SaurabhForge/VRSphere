@@ -25,6 +25,7 @@ export const WebRTCProvider = ({ children }) => {
 
   const peersRef = useRef({}); // { socketId: RTCPeerConnection }
   const localStreamRef = useRef(null);
+  const remoteStreamsRef = useRef({}); // { socketId: MediaStream }
   const pendingIceCandidatesRef = useRef({}); // { socketId: RTCIceCandidateInit[] }
   const socketRef = useRef(null);
   const roomIdRef = useRef(null);
@@ -44,6 +45,16 @@ export const WebRTCProvider = ({ children }) => {
   }, []);
 
   // ─── Initialize local media ─────────────────────────────────────
+  const publishRemoteStream = useCallback((socketId) => {
+    const stream = remoteStreamsRef.current[socketId];
+    if (!stream) return;
+
+    setRemoteStreams((prev) => ({
+      ...prev,
+      [socketId]: new MediaStream(stream.getTracks()),
+    }));
+  }, []);
+
   const initLocalStream = useCallback(async (video = true, audio = true) => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video, audio });
@@ -66,10 +77,18 @@ export const WebRTCProvider = ({ children }) => {
     const peer = new RTCPeerConnection(ICE_SERVERS);
 
     // Add local tracks
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach((track) => {
-        peer.addTrack(track, localStreamRef.current);
+    const localStream = localStreamRef.current;
+    if (localStream) {
+      localStream.getTracks().forEach((track) => {
+        peer.addTrack(track, localStream);
       });
+    }
+
+    if (!localStream?.getAudioTracks().length) {
+      peer.addTransceiver('audio', { direction: 'recvonly' });
+    }
+    if (!localStream?.getVideoTracks().length) {
+      peer.addTransceiver('video', { direction: 'recvonly' });
     }
 
     // ICE candidates
@@ -84,11 +103,29 @@ export const WebRTCProvider = ({ children }) => {
 
     // Remote stream
     peer.ontrack = (e) => {
-      setRemoteStreams((prev) => ({ ...prev, [targetSocketId]: e.streams[0] }));
+      if (!remoteStreamsRef.current[targetSocketId]) {
+        remoteStreamsRef.current[targetSocketId] = new MediaStream();
+      }
+
+      const remoteStream = remoteStreamsRef.current[targetSocketId];
+      const isNewTrack = !remoteStream.getTracks().some((track) => track.id === e.track.id);
+      if (isNewTrack) {
+        remoteStream.addTrack(e.track);
+
+        const republish = () => publishRemoteStream(targetSocketId);
+        e.track.addEventListener('mute', republish);
+        e.track.addEventListener('unmute', republish);
+        e.track.addEventListener('ended', () => {
+          remoteStream.removeTrack(e.track);
+          republish();
+        });
+      }
+      publishRemoteStream(targetSocketId);
     };
 
     peer.onconnectionstatechange = () => {
       if (peer.connectionState === 'failed' || peer.connectionState === 'closed') {
+        delete remoteStreamsRef.current[targetSocketId];
         setRemoteStreams((prev) => {
           const next = { ...prev };
           delete next[targetSocketId];
@@ -112,7 +149,7 @@ export const WebRTCProvider = ({ children }) => {
     }
 
     return peer;
-  }, []);
+  }, [publishRemoteStream]);
 
   // ─── Handle incoming offer ───────────────────────────────────────
   const handleOffer = useCallback(async ({ offer, fromSocketId, socket }) => {
@@ -159,6 +196,7 @@ export const WebRTCProvider = ({ children }) => {
       peersRef.current[socketId].close();
       delete peersRef.current[socketId];
     }
+    delete remoteStreamsRef.current[socketId];
     delete pendingIceCandidatesRef.current[socketId];
     setRemoteStreams((prev) => {
       const next = { ...prev };
@@ -224,6 +262,7 @@ export const WebRTCProvider = ({ children }) => {
   const cleanup = useCallback(() => {
     Object.values(peersRef.current).forEach((p) => p.close());
     peersRef.current = {};
+    remoteStreamsRef.current = {};
     pendingIceCandidatesRef.current = {};
     localStreamRef.current?.getTracks().forEach((t) => t.stop());
     localStreamRef.current = null;
