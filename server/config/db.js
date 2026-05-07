@@ -1,15 +1,18 @@
 const mongoose = require('mongoose');
 
-const USE_MEMORY_DB =
-  !process.env.MONGODB_URI ||
-  process.env.MONGODB_URI.includes('localhost') ||
-  process.env.MONGODB_URI.includes('127.0.0.1');
-
 const connectDB = async () => {
   try {
     let uri = process.env.MONGODB_URI;
+    const isProduction = process.env.NODE_ENV === 'production';
+    const useMemoryDB =
+      !uri ||
+      (!isProduction && (uri.includes('localhost') || uri.includes('127.0.0.1')));
 
-    if (USE_MEMORY_DB) {
+    if (isProduction && !uri) {
+      throw new Error('MONGODB_URI is required in production');
+    }
+
+    if (useMemoryDB) {
       // Zero-config dev mode: spin up an in-memory MongoDB instance
       const { MongoMemoryServer } = require('mongodb-memory-server');
       const mongod = await MongoMemoryServer.create();

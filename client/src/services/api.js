@@ -1,6 +1,16 @@
 import axios from 'axios';
 
-const API = axios.create({ baseURL: '/api' });
+const DEFAULT_RENDER_API_URL = 'https://vrsphere-backend.onrender.com/api';
+
+const getApiBaseUrl = () => {
+  if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
+  if (typeof window !== 'undefined' && window.location.hostname.endsWith('.onrender.com')) {
+    return DEFAULT_RENDER_API_URL;
+  }
+  return '/api';
+};
+
+const API = axios.create({ baseURL: getApiBaseUrl() });
 
 // Attach token to every request
 API.interceptors.request.use((config) => {

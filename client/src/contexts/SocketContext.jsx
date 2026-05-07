@@ -4,6 +4,16 @@ import { useAuth } from './AuthContext';
 
 const SocketContext = createContext(null);
 
+const DEFAULT_RENDER_SOCKET_URL = 'https://vrsphere-backend.onrender.com';
+
+const getSocketUrl = () => {
+  if (import.meta.env.VITE_SOCKET_URL) return import.meta.env.VITE_SOCKET_URL;
+  if (typeof window !== 'undefined' && window.location.hostname.endsWith('.onrender.com')) {
+    return DEFAULT_RENDER_SOCKET_URL;
+  }
+  return '/';
+};
+
 export const SocketProvider = ({ children }) => {
   const { user } = useAuth();
   const socketRef = useRef(null);
@@ -13,9 +23,10 @@ export const SocketProvider = ({ children }) => {
     if (!user) return;
 
     const token = localStorage.getItem('vrsphere_token');
-    socketRef.current = io('/', {
+    socketRef.current = io(getSocketUrl(), {
       auth: { token },
       transports: ['websocket'],
+      withCredentials: true,
     });
 
     socketRef.current.on('connect', () => {

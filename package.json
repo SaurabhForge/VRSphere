@@ -1,0 +1,7 @@
+{
+  "name": "vrsphere-render-root",
+  "private": true,
+  "scripts": {
+    "postinstall": "cd server && npm install"
+  }
+}
