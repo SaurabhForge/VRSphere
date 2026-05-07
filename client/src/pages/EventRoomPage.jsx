@@ -170,9 +170,6 @@ export default function EventRoomPage() {
       socket.emit('join-room', roomPayload);
     };
 
-    if (socket.connected) joinCurrentRoom();
-    socket.on('connect', joinCurrentRoom);
-
     // Existing users — initiate offers
     const handleRoomUsers = (users) => {
       setParticipants(users);
@@ -215,6 +212,9 @@ export default function EventRoomPage() {
 
     // Reactions
     socket.on('receive-reaction', handleReceiveReaction);
+
+    if (socket.connected) joinCurrentRoom();
+    socket.on('connect', joinCurrentRoom);
 
     return () => {
       socket.off('connect', joinCurrentRoom);
