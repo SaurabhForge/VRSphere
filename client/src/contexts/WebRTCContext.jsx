@@ -16,6 +16,10 @@ const ICE_SERVERS = {
   ],
 };
 
+const hasLiveTrack = (stream, kind) => (
+  stream?.getTracks?.().some((track) => track.kind === kind && track.readyState === 'live')
+);
+
 export const WebRTCProvider = ({ children }) => {
   const [localStream, setLocalStream] = useState(null);
   const [remoteStreams, setRemoteStreams] = useState({}); // { socketId: MediaStream }
@@ -56,16 +60,31 @@ export const WebRTCProvider = ({ children }) => {
   }, []);
 
   const initLocalStream = useCallback(async (video = true, audio = true) => {
+    const currentStream = localStreamRef.current;
+    const hasRequestedVideo = !video || hasLiveTrack(currentStream, 'video');
+    const hasRequestedAudio = !audio || hasLiveTrack(currentStream, 'audio');
+
+    if (currentStream && hasRequestedVideo && hasRequestedAudio) {
+      setLocalStream(currentStream);
+      return currentStream;
+    }
+
     try {
+      currentStream?.getTracks().forEach((track) => track.stop());
+
       const stream = await navigator.mediaDevices.getUserMedia({ video, audio });
       localStreamRef.current = stream;
       setLocalStream(stream);
+      setVideoEnabled(stream.getVideoTracks().some((track) => track.enabled));
+      setAudioEnabled(stream.getAudioTracks().some((track) => track.enabled));
       return stream;
     } catch (err) {
       console.warn('Media access denied, continuing without:', err.message);
       const emptyStream = new MediaStream();
       localStreamRef.current = emptyStream;
       setLocalStream(emptyStream);
+      setVideoEnabled(false);
+      setAudioEnabled(false);
       return emptyStream;
     }
   }, []);

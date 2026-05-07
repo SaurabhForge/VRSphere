@@ -12,24 +12,40 @@ import LoadingSpinner from '../components/UI/LoadingSpinner';
 function StreamTile({ stream, label, muted = false }) {
   const videoRef = useRef(null);
   const [videoReady, setVideoReady] = useState(false);
+  const [forceMuted, setForceMuted] = useState(false);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return undefined;
 
     video.srcObject = stream || null;
+    video.muted = muted || forceMuted;
 
     const updateVideoState = () => {
       const hasLiveVideoTrack = stream?.getVideoTracks?.().some(
         (track) => track.readyState === 'live'
       );
       const hasFrame = video.videoWidth > 0;
+      const ready = Boolean(hasLiveVideoTrack && hasFrame);
 
-      setVideoReady(Boolean(hasLiveVideoTrack && hasFrame));
+      if (!stream) {
+        setVideoReady(false);
+        return;
+      }
 
-      if (stream) {
-        const playPromise = video.play();
-        if (playPromise?.catch) playPromise.catch(() => {});
+      const playPromise = video.play();
+      if (playPromise?.then) {
+        playPromise
+          .then(() => setVideoReady(ready))
+          .catch(() => {
+            if (!muted && !forceMuted) {
+              setForceMuted(true);
+            } else {
+              setVideoReady(false);
+            }
+          });
+      } else {
+        setVideoReady(ready);
       }
     };
 
@@ -66,14 +82,14 @@ function StreamTile({ stream, label, muted = false }) {
       video.removeEventListener('resize', updateVideoState);
       if (video.srcObject === stream) video.srcObject = null;
     };
-  }, [stream]);
+  }, [stream, muted, forceMuted]);
 
   return (
     <div className="participant-video" style={{ width: 220, aspectRatio: '16 / 10', borderRadius: 'var(--radius-lg)' }}>
       <video
         ref={videoRef}
         autoPlay
-        muted={muted}
+        muted={muted || forceMuted}
         playsInline
         style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: videoReady ? 1 : 0 }}
       />
