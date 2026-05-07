@@ -9,11 +9,42 @@ import React, {
 
 const WebRTCContext = createContext(null);
 
-const ICE_SERVERS = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-  ],
+const DEFAULT_ICE_SERVERS = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:openrelay.metered.ca:80' },
+  {
+    urls: 'turn:openrelay.metered.ca:80',
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
+  {
+    urls: 'turn:openrelay.metered.ca:443',
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
+  {
+    urls: 'turns:openrelay.metered.ca:443',
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
+];
+
+const getIceServers = () => {
+  if (!import.meta.env.VITE_ICE_SERVERS) return DEFAULT_ICE_SERVERS;
+
+  try {
+    const iceServers = JSON.parse(import.meta.env.VITE_ICE_SERVERS);
+    return Array.isArray(iceServers) ? iceServers : DEFAULT_ICE_SERVERS;
+  } catch (error) {
+    console.warn('Invalid VITE_ICE_SERVERS, using defaults:', error);
+    return DEFAULT_ICE_SERVERS;
+  }
+};
+
+const ICE_CONFIG = {
+  iceServers: getIceServers(),
+  iceCandidatePoolSize: 10,
 };
 
 const hasLiveTrack = (stream, kind) => (
@@ -93,7 +124,7 @@ export const WebRTCProvider = ({ children }) => {
   const createPeer = useCallback((targetSocketId, socket, initiator) => {
     if (peersRef.current[targetSocketId]) return peersRef.current[targetSocketId];
 
-    const peer = new RTCPeerConnection(ICE_SERVERS);
+    const peer = new RTCPeerConnection(ICE_CONFIG);
 
     // Add local tracks
     const localStream = localStreamRef.current;
