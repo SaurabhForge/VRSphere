@@ -6,7 +6,24 @@ const socketHandler = (io) => {
     console.log(`🔌 Socket connected: ${socket.id}`);
 
     // ─── Join Room ───────────────────────────────────────────────
+    const leaveRoom = (roomId) => {
+      if (!roomId || !rooms[roomId]?.[socket.id]) return;
+
+      delete rooms[roomId][socket.id];
+      socket.leave(roomId);
+      socket.to(roomId).emit('user-left', { socketId: socket.id });
+      io.to(roomId).emit('participant-count', Object.keys(rooms[roomId]).length);
+
+      if (Object.keys(rooms[roomId]).length === 0) {
+        delete rooms[roomId];
+      }
+    };
+
     socket.on('join-room', ({ roomId, userId, userName, userAvatar }) => {
+      if (socket.data.roomId && socket.data.roomId !== roomId) {
+        leaveRoom(socket.data.roomId);
+      }
+
       socket.join(roomId);
 
       if (!rooms[roomId]) rooms[roomId] = {};
@@ -95,17 +112,20 @@ const socketHandler = (io) => {
       socket.to(roomId).emit('peer-screen-share-stop', { socketId: socket.id });
     });
 
+    socket.on('leave-room', ({ roomId } = {}) => {
+      const targetRoomId = roomId || socket.data.roomId;
+      leaveRoom(targetRoomId);
+      if (socket.data.roomId === targetRoomId) {
+        delete socket.data.roomId;
+      }
+      console.log(`${socket.data.userName || socket.id} left room ${targetRoomId}`);
+    });
+
     // ─── Disconnect ──────────────────────────────────────────────
     socket.on('disconnect', () => {
       const { roomId, userName } = socket.data;
-      if (roomId && rooms[roomId]) {
-        delete rooms[roomId][socket.id];
-        socket.to(roomId).emit('user-left', { socketId: socket.id });
-        io.to(roomId).emit('participant-count', Object.keys(rooms[roomId]).length);
-
-        if (Object.keys(rooms[roomId]).length === 0) {
-          delete rooms[roomId];
-        }
+      if (roomId) {
+        leaveRoom(roomId);
         console.log(`❌ ${userName || socket.id} left room ${roomId}`);
       }
       console.log(`🔌 Socket disconnected: ${socket.id}`);

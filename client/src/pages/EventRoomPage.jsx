@@ -9,6 +9,39 @@ import ChatPanel from '../components/EventRoom/ChatPanel';
 import ControlBar from '../components/EventRoom/ControlBar';
 import LoadingSpinner from '../components/UI/LoadingSpinner';
 
+function StreamTile({ stream, label, muted = false }) {
+  const videoRef = useRef(null);
+  const hasVideo = stream?.getVideoTracks?.().some(
+    (track) => track.readyState === 'live' && track.enabled
+  );
+
+  useEffect(() => {
+    if (videoRef.current && stream) {
+      videoRef.current.srcObject = stream;
+    }
+  }, [stream]);
+
+  return (
+    <div className="participant-video" style={{ width: 220, aspectRatio: '16 / 10', borderRadius: 'var(--radius-lg)' }}>
+      {stream && (
+        <video
+          ref={videoRef}
+          autoPlay
+          muted={muted}
+          playsInline
+          style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: hasVideo ? 1 : 0 }}
+        />
+      )}
+      {!hasVideo && (
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(39, 39, 42, 0.9)', color: 'var(--text-muted)', fontWeight: 700 }}>
+          Camera off
+        </div>
+      )}
+      <div className="participant-label">{label}</div>
+    </div>
+  );
+}
+
 export default function EventRoomPage() {
   const { eventId } = useParams();
   const navigate = useNavigate();
@@ -31,7 +64,7 @@ export default function EventRoomPage() {
   const [showChat, setShowChat] = useState(true);
   const [reactions, setReactions] = useState([]);
   const [toast, setToast] = useState(null);
-  const localVideoRef = useRef(null);
+  const [mediaReady, setMediaReady] = useState(false);
 
   const showToast = (msg, type = 'info') => {
     setToast({ msg, type });
@@ -48,20 +81,22 @@ export default function EventRoomPage() {
 
   // Init media stream
   useEffect(() => {
-    initLocalStream(true, true);
-    return () => cleanup();
-  }, []);
+    let active = true;
+    setMediaReady(false);
 
-  // Attach local video
-  useEffect(() => {
-    if (localVideoRef.current && localStream) {
-      localVideoRef.current.srcObject = localStream;
-    }
-  }, [localStream]);
+    initLocalStream(true, true).finally(() => {
+      if (active) setMediaReady(true);
+    });
+
+    return () => {
+      active = false;
+      cleanup();
+    };
+  }, [initLocalStream, cleanup]);
 
   // Socket room events
   useEffect(() => {
-    if (!socket || !user || !event) return;
+    if (!socket || !user || !event || !mediaReady) return;
 
     socket.emit('join-room', {
       roomId: eventId,
@@ -110,8 +145,20 @@ export default function EventRoomPage() {
       socket.off('webrtc-ice-candidate');
       socket.off('receive-message');
       socket.off('receive-reaction');
+      socket.emit('leave-room', { roomId: eventId });
     };
-  }, [socket, user, event]);
+  }, [
+    socket,
+    user,
+    event,
+    eventId,
+    mediaReady,
+    createPeer,
+    handleOffer,
+    handleAnswer,
+    handleIceCandidate,
+    removePeer,
+  ]);
 
   const handleSendMessage = (text) => {
     if (!socket) return;
@@ -144,6 +191,12 @@ export default function EventRoomPage() {
 
   if (loading) return <LoadingSpinner fullPage />;
 
+  const remoteStreamEntries = Object.entries(remoteStreams).map(([socketId, stream]) => ({
+    socketId,
+    stream,
+    userName: participants.find((p) => p.socketId === socketId)?.userName || 'Participant',
+  }));
+
   return (
     <div className="vr-room-wrapper">
       {/* Top bar */}
@@ -174,6 +227,13 @@ export default function EventRoomPage() {
             showChat={showChat}
             onToggleChat={() => setShowChat((p) => !p)}
           />
+
+          <div style={{ position: 'absolute', top: 16, right: 16, display: 'flex', flexDirection: 'column', gap: 10, zIndex: 40, maxHeight: 'calc(100% - 150px)', overflowY: 'auto', pointerEvents: 'auto' }}>
+            {localStream && <StreamTile stream={localStream} label={`${user?.name || 'You'} (You)`} muted />}
+            {remoteStreamEntries.map(({ socketId, stream, userName }) => (
+              <StreamTile key={socketId} stream={stream} label={userName} />
+            ))}
+          </div>
 
           {/* Floating reactions */}
           <div style={{ position: 'absolute', bottom: 100, left: 24, display: 'flex', flexDirection: 'column', gap: 6, pointerEvents: 'none' }}>

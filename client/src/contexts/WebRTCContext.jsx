@@ -25,8 +25,23 @@ export const WebRTCProvider = ({ children }) => {
 
   const peersRef = useRef({}); // { socketId: RTCPeerConnection }
   const localStreamRef = useRef(null);
+  const pendingIceCandidatesRef = useRef({}); // { socketId: RTCIceCandidateInit[] }
   const socketRef = useRef(null);
   const roomIdRef = useRef(null);
+
+  const flushPendingIceCandidates = useCallback(async (socketId, peer) => {
+    const pending = pendingIceCandidatesRef.current[socketId] || [];
+    if (!pending.length) return;
+
+    pendingIceCandidatesRef.current[socketId] = [];
+    for (const candidate of pending) {
+      try {
+        await peer.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (e) {
+        console.warn('ICE error', e);
+      }
+    }
+  }, []);
 
   // ─── Initialize local media ─────────────────────────────────────
   const initLocalStream = useCallback(async (video = true, audio = true) => {
@@ -103,26 +118,38 @@ export const WebRTCProvider = ({ children }) => {
   const handleOffer = useCallback(async ({ offer, fromSocketId, socket }) => {
     const peer = createPeer(fromSocketId, socket, false);
     await peer.setRemoteDescription(new RTCSessionDescription(offer));
+    await flushPendingIceCandidates(fromSocketId, peer);
     const answer = await peer.createAnswer();
     await peer.setLocalDescription(answer);
     socket.emit('webrtc-answer', { targetSocketId: fromSocketId, answer });
-  }, [createPeer]);
+  }, [createPeer, flushPendingIceCandidates]);
 
   // ─── Handle incoming answer ──────────────────────────────────────
   const handleAnswer = useCallback(async ({ answer, fromSocketId }) => {
     const peer = peersRef.current[fromSocketId];
-    if (peer) await peer.setRemoteDescription(new RTCSessionDescription(answer));
-  }, []);
+    if (peer) {
+      await peer.setRemoteDescription(new RTCSessionDescription(answer));
+      await flushPendingIceCandidates(fromSocketId, peer);
+    }
+  }, [flushPendingIceCandidates]);
 
   // ─── Handle ICE candidate ────────────────────────────────────────
   const handleIceCandidate = useCallback(async ({ candidate, fromSocketId }) => {
     const peer = peersRef.current[fromSocketId];
-    if (peer && candidate) {
-      try {
-        await peer.addIceCandidate(new RTCIceCandidate(candidate));
-      } catch (e) {
-        console.warn('ICE error', e);
-      }
+    if (!candidate) return;
+
+    if (!peer || !peer.remoteDescription) {
+      pendingIceCandidatesRef.current[fromSocketId] = [
+        ...(pendingIceCandidatesRef.current[fromSocketId] || []),
+        candidate,
+      ];
+      return;
+    }
+
+    try {
+      await peer.addIceCandidate(new RTCIceCandidate(candidate));
+    } catch (e) {
+      console.warn('ICE error', e);
     }
   }, []);
 
@@ -132,6 +159,7 @@ export const WebRTCProvider = ({ children }) => {
       peersRef.current[socketId].close();
       delete peersRef.current[socketId];
     }
+    delete pendingIceCandidatesRef.current[socketId];
     setRemoteStreams((prev) => {
       const next = { ...prev };
       delete next[socketId];
@@ -196,6 +224,7 @@ export const WebRTCProvider = ({ children }) => {
   const cleanup = useCallback(() => {
     Object.values(peersRef.current).forEach((p) => p.close());
     peersRef.current = {};
+    pendingIceCandidatesRef.current = {};
     localStreamRef.current?.getTracks().forEach((t) => t.stop());
     localStreamRef.current = null;
     setLocalStream(null);
