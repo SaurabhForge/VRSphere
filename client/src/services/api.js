@@ -2,8 +2,13 @@ import axios from 'axios';
 
 const DEFAULT_RENDER_API_URL = 'https://vrsphere-backend.onrender.com/api';
 
+const normalizeApiBaseUrl = (url) => {
+  const normalized = url.replace(/\/$/, '');
+  return normalized.endsWith('/api') ? normalized : `${normalized}/api`;
+};
+
 const getApiBaseUrl = () => {
-  if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
+  if (import.meta.env.VITE_API_URL) return normalizeApiBaseUrl(import.meta.env.VITE_API_URL);
   if (typeof window !== 'undefined' && window.location.hostname.endsWith('.onrender.com')) {
     return DEFAULT_RENDER_API_URL;
   }
